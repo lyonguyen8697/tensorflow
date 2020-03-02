@@ -105,15 +105,16 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
     memory::dims weight_dims = memory::dims({channel, k});
     memory::dims bias_dims = memory::dims({channel});
     memory::dims dst_dims = memory::dims({batch, channel});
-    memory::format weight_format =
-        transpose_b_ ? memory::format::oi : memory::format::io;
+    MEMORY_FORMAT src_format = MEMORY_FORMAT::nc;
+    MEMORY_FORMAT weight_format =
+        transpose_b_ ? MEMORY_FORMAT::oi : MEMORY_FORMAT::io;
 
     // Set weight format for primitive:
     //   1. const, let MKL-DNN determine format because it will be cached;
     //   2. var, keep the original format to avoid reordering.
     MklDnnMatMulFwdParams matmul_params(
-        src_dims, weight_dims, bias_dims, dst_dims,
-        (this->is_weight_const_) ? memory::format::any : weight_format);
+        src_dims, weight_dims, bias_dims, dst_dims, src_format,
+        (this->is_weight_const_) ? MEMORY_FORMAT::any : weight_format);
 
     // Extend the basic parameters for data types and fusions.
     ExtendMklDnnMatMulFwdParams(ctx, matmul_params);
@@ -126,8 +127,8 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
         matmul_prim->GetPrimitiveDesc();
 
     if (src_mkl_shape.IsMklTensor()) {
-      this->AllocateOutputTensor(ctx, *matmul_pd, dst_dims, memory::format::nc,
-                                 &dst_tensor);
+      this->AllocateOutputTensor(ctx, *matmul_pd, dst_dims,
+                                 MKL_TENSOR_FORMAT_NC, &dst_tensor);
     } else {
       TensorShape dst_tensor_shape({batch, channel});
       MklDnnShape dst_mkl_shape;
@@ -152,46 +153,52 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
       MklDnnData<T> src_mkl(&(this->cpu_engine_));
       MklDnnData<T> weight_mkl(&(this->cpu_engine_));
 
-      if (src_mkl_shape.IsMklTensor()) {
-        memory::desc input_md = src_mkl_shape.GetMklLayout();
+      auto src_md = src_mkl_shape.IsMklTensor()
+                        ? src_mkl_shape.GetMklLayout()
+                        : memory::desc(src_dims, MklDnnType<T>(), src_format);
 
-        if (input_md.data.format != memory::format::nc) {
-          src_mkl.SetUsrMem(input_md, src_data);
-          src_mkl.CheckReorderToOpMem(matmul_pd.get()->src_primitive_desc());
-          src_data = reinterpret_cast<T*>(src_mkl.GetOpMem().get_data_handle());
-        }
+      if (IS_SRC_REORDER_NEEDED(src_md, matmul_pd, matmul_prim)) {
+        src_mkl.SetUsrMem(src_md, src_data);
+        src_mkl.CheckReorderToOpMem(MEMORY_PD_WITHOUT_DATA(
+            matmul_pd.get()->PRIMITIVE_DESC_SRC, this->cpu_engine_));
+        src_data = reinterpret_cast<T*>(src_mkl.GetOpMem().get_data_handle());
       }
 
       // Get cached data when weight is const.
-      memory::format expected_format = matmul_prim->GetweightMemoryFormat();
-      DCHECK(expected_format != weight_format && this->is_weight_const_);
-      if (this->is_weight_const_) {
+      const memory::desc weight_md =
+          memory::desc(weight_dims, MklDnnType<T>(), weight_format);
+      if (IS_WEIGHTS_REORDER_NEEDED(weight_md, matmul_pd, matmul_prim)) {
         T* cached_weight_data = nullptr;
-        if (this->IsWeightCacheEmpty(ctx)) {
-          auto weight_md =
-              memory::desc(weight_dims, MklDnnType<T>(), weight_format);
-          this->CacheWeight(ctx, matmul_pd, cached_weight_data, weight_tensor,
-                            weight_mkl, weight_md);
+
+        if (this->is_weight_const_) {
+          if (this->IsWeightCacheEmpty(ctx)) {
+            this->CacheWeight(ctx, matmul_pd, cached_weight_data, weight_tensor,
+                              weight_mkl, weight_md);
+          }
+#ifdef ENABLE_MKLDNN_V1
+          cached_weight_data = this->GetCachedWeight(
+              ctx, GET_WEIGHTS_DESC_FROM_OP_PD(matmul_pd));
+#else
+          cached_weight_data = this->GetCachedWeight(
+              ctx, GET_WEIGHTS_DESC_FROM_OP_PD(matmul_pd).desc());
+#endif
         }
-        cached_weight_data = this->GetCachedWeight(ctx, expected_format);
 
         // Cache weight may fail when it gets different format in different
         // iteration. Fallback to reoder if it happens.
-        // TODO: Fix this slow path.
+        // Also do generel reorder if weight isn't const.
         if (cached_weight_data != nullptr) {
           weight_data = cached_weight_data;
         } else {
-          memory::desc input_md =
-              memory::desc(weight_dims, MklDnnType<T>(), weight_format);
-
-          weight_mkl.SetUsrMem(input_md, weight_data);
-          weight_mkl.CheckReorderToOpMem(
-              matmul_pd.get()->weights_primitive_desc());
+          weight_mkl.SetUsrMem(weight_md, weight_data);
+          weight_mkl.CheckReorderToOpMem(MEMORY_PD_WITHOUT_DATA(
+              matmul_pd.get()->PRIMITIVE_DESC_WEIGHTS, this->cpu_engine_));
           weight_data =
               reinterpret_cast<T*>(weight_mkl.GetOpMem().get_data_handle());
         }
       }
 
+      // Execute fused matmul op.
       matmul_prim->Execute(src_data, weight_data, bias_data, dst_data);
     } catch (mkldnn::error& e) {
       string error_msg = "Status: " + std::to_string(e.status) +

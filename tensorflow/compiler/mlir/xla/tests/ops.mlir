@@ -292,6 +292,22 @@ func @infeed_non_token_second_result(%token: !xla_hlo.token) -> tuple<tuple<tens
 
 // -----
 
+func @iota_scalar() -> tensor<i32> {
+  // expected-error@+1 {{does not support scalars}}
+  %0 = "xla_hlo.iota"() {iota_dimension = 0 : i64} : () -> tensor<i32>
+  return %0 : tensor<i32>
+}
+
+// -----
+
+func @iota_invalid_iota_dimension() -> tensor<4xi32> {
+  // expected-error@+1 {{iota dimension cannot go beyond the output rank or be negative}}
+  %0 = "xla_hlo.iota"() {iota_dimension = 1 : i64} : () -> tensor<4xi32>
+  return %0 : tensor<4xi32>
+}
+
+// -----
+
 func @map_mismatched_args(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) -> tensor<4xf32> {
   // expected-error@+1 {{expects number of operands to match the arity of map computation, but got: 2 and 1}}
   %0 = "xla_hlo.map"(%arg0, %arg1) ( {
@@ -433,6 +449,14 @@ func @rng_uniform_invalid_type(%mu: tensor<complex<f32>>, %sigma: tensor<f32>) -
   // expected-error@+1 {{must be tensor of pred (AKA boolean or 1-bit integer) or 8/16/32/64-bit integer or floating-point values, but got 'tensor<complex<f32>>'}}
   %0 = "xla_hlo.rng_uniform"(%mu, %sigma, %shape) : (tensor<complex<f32>>, tensor<f32>, tensor<3xi64>) -> tensor<2x3x5xf32>
   return %0 : tensor<2x3x5xf32>
+}
+
+// -----
+
+// CHECK-LABEL: @scalars_to_dimension_tensor
+func @scalars_to_dimension_tensor(%arg0: i32, %arg1: i32) -> tensor<2xi32> {
+  %0 = "xla_hlo.scalars_to_dimension_tensor"(%arg0, %arg1) : (i32, i32) -> tensor<2xi32>
+  return %0 : tensor<2xi32>
 }
 
 // -----

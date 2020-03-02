@@ -1,7 +1,7 @@
 # Description:
 #  Tools for building the TensorFlow pip package.
 
-load("//tensorflow:tensorflow.bzl", "if_windows", "if_xla_available", "transitive_hdrs")
+load("//tensorflow:tensorflow.bzl", "if_windows", "transitive_hdrs")
 load("//third_party/mkl:build_defs.bzl", "if_mkl", "if_mkl_ml")
 load("@local_config_cuda//cuda:build_defs.bzl", "if_cuda")
 load("@local_config_syslibs//:build_defs.bzl", "if_not_system_lib")
@@ -84,6 +84,7 @@ COMMON_PIP_DEPS = [
     "//tensorflow/lite/python:tflite_convert",
     "//tensorflow/lite/toco/python:toco_from_protos",
     "//tensorflow/python/autograph/core:test_lib",
+    "//tensorflow/python/autograph/impl/testing:pybind_for_testing",
     "//tensorflow/python/autograph/pyct/testing",
     "//tensorflow/python/autograph/pyct/common_transformers:common_transformers",
     "//tensorflow/python/compiler:compiler",
@@ -158,6 +159,7 @@ filegroup(
         "@com_google_protobuf//:LICENSE",
         "@com_googlesource_code_re2//:LICENSE",
         "@curl//:COPYING",
+        "@dlpack//:LICENSE",
         "@double_conversion//:LICENSE",
         "@eigen_archive//:COPYING.MPL2",
         "@enum34_archive//:LICENSE",
@@ -198,6 +200,9 @@ filegroup(
         "//tensorflow:no_aws_support": [],
         "//conditions:default": [
             "@aws//:LICENSE",
+            "@aws-c-common//:LICENSE",
+            "@aws-c-event-stream//:LICENSE",
+            "@aws-checksums//:LICENSE",
         ],
     }) + select({
         "//tensorflow:android": [],
