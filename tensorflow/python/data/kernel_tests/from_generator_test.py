@@ -227,21 +227,22 @@ class FromGeneratorTest(test_base.DatasetTestBase, parameterized.TestCase):
         dataset, expected_output=[b"foo", b"bar", b"baz"])
 
   @combinations.generate(test_base.default_test_combinations())
-  def testFromGeneratorDict(self):
+  def testFromGeneratorDatastructures(self):
+    # Tests multiple datastructures.
     def generator():
-      yield {"a": "foo", "b": [1, 2]}
-      yield {"a": "bar", "b": [3, 4]}
-      yield {"a": "baz", "b": [5, 6]}
+      yield {"a": "foo", "b": [1, 2], "c": (9,)}
+      yield {"a": "bar", "b": [3], "c": (7, 6)}
+      yield {"a": "baz", "b": [5, 6], "c": (5, 4)}
 
     dataset = dataset_ops.Dataset.from_generator(
         generator,
-        output_types={"a": dtypes.string, "b": dtypes.int32},
-        output_shapes={"a": [], "b": [None]})
+        output_types={"a": dtypes.string, "b": dtypes.int32, "c": dtypes.int32},
+        output_shapes={"a": [], "b": [None], "c": [None]})
     self.assertDatasetProduces(
         dataset,
-        expected_output=[{"a": b"foo", "b": [1, 2]},
-                         {"a": b"bar", "b": [3, 4]},
-                         {"a": b"baz", "b": [5, 6]}])
+        expected_output=[{"a": b"foo", "b": [1, 2], "c": [9]},
+                         {"a": b"bar", "b": [3], "c": [7, 6]},
+                         {"a": b"baz", "b": [5, 6], "c": [5, 4]}])
 
   @combinations.generate(test_base.default_test_combinations())
   def testFromGeneratorTypeError(self):
@@ -452,7 +453,7 @@ class FromGeneratorTest(test_base.DatasetTestBase, parameterized.TestCase):
       for _ in range(10):
         yield [20]
 
-    with self.assertRaisesRegexp(
+    with self.assertRaisesRegex(
         TypeError, r"Cannot convert value \[tf.int64\] to a TensorFlow DType"):
       dataset_ops.Dataset.from_generator(
           generator, output_types=[dtypes.int64])
@@ -464,8 +465,8 @@ class FromGeneratorTest(test_base.DatasetTestBase, parameterized.TestCase):
       for _ in range(10):
         yield [20]
 
-    with self.assertRaisesRegexp(
-        TypeError, r"Failed to convert '\[\[1\]\]' to a shape"):
+    with self.assertRaisesRegex(TypeError,
+                                r"Dimension value must be integer or None"):
       dataset_ops.Dataset.from_generator(
           generator, output_types=(dtypes.int64), output_shapes=[[1]])
 

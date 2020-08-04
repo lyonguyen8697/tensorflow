@@ -33,7 +33,6 @@ limitations under the License.
 #include "mlir/IR/PatternMatch.h"  // from @llvm-project
 #include "mlir/IR/StandardTypes.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
-#include "mlir/Support/Functional.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_info.pb.h"
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_passes.h"
@@ -77,7 +76,8 @@ class ImportQuantStatsPass
   // If the index is out of range, this method returns false. Otherwise it
   // returns true if the value is a float tensor.
   bool IsQuantizableResult(Operation *op, int index) {
-    if (index < 0 || index >= op->getNumResults()) return false;
+    if (index < 0 || index >= static_cast<int>(op->getNumResults()))
+      return false;
     Value res = op->getResult(index);
     return res.getType().isa<ShapedType>() &&
            res.getType().cast<ShapedType>().getElementType().isa<FloatType>();
@@ -159,7 +159,7 @@ void ImportQuantStatsPass::ImportAsStatsOps(OpBuilder b, Operation *op,
     InsertStatsOpAtResult(b, op->getResult(index), layer_stats, axis_stats,
                           axis);
   } else {
-    for (int i = 0; i < op->getNumResults(); ++i) {
+    for (int i = 0, e = op->getNumResults(); i < e; ++i) {
       if (IsQuantizableResult(op, i)) {
         InsertStatsOpAtResult(b, op->getResult(i), layer_stats, axis_stats,
                               axis);

@@ -13,11 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <ctime>
-
 #include "tensorflow/lite/c/builtin_op_data.h"
 #include "tensorflow/lite/c/common.h"
-#include "tensorflow/lite/micro/kernels/micro_ops.h"
+#include "tensorflow/lite/micro/micro_time.h"
 #include "tensorflow/lite/micro/testing/test_utils.h"
 
 namespace tflite {
@@ -27,24 +25,24 @@ namespace {
 // Takes in quantized tensors along with expected outputs, and runs a single
 // iteration of the conv op with the supplied parameters. Compares outputs vs
 // the expected outputs and logs any differences found. Additionally, logs the
-// number of clocks taken by the invoke call.
+// number of clock ticks taken by the invoke call.
 TfLiteStatus ValidateConvGoldens(TfLiteTensor* tensors, int tensors_size,
                                  TfLiteConvParams* conv_params, int tolerance,
                                  int output_length,
-                                 const int8_t* expected_output_data) {
-  MicroErrorReporter micro_reporter;
+                                 const int8_t* expected_output_data,
+                                 ErrorReporter* reporter) {
   TfLiteContext context;
-  PopulateContext(tensors, tensors_size, &micro_reporter, &context);
+  PopulateContext(tensors, tensors_size, reporter, &context);
 
-  const TfLiteRegistration* registration = ops::micro::Register_CONV_2D();
+  const TfLiteRegistration registration = ops::micro::Register_CONV_2D();
 
   const char* init_data = reinterpret_cast<const char*>(conv_params);
 
   // Init data size is always 0 for builtin ops.
   const size_t init_data_size = 0;
   void* user_data = nullptr;
-  if (registration->init) {
-    user_data = registration->init(&context, init_data, init_data_size);
+  if (registration.init) {
+    user_data = registration.init(&context, init_data, init_data_size);
   }
 
   // For an N element array, the raw array will be {N, Element 1, ... Element N}
@@ -54,33 +52,29 @@ TfLiteStatus ValidateConvGoldens(TfLiteTensor* tensors, int tensors_size,
   // There is 1 output at index 3 in the tensors array.
   int outputs_array_data[] = {1, 3};
   TfLiteIntArray* outputs_array = IntArrayFromInts(outputs_array_data);
-  // There are no temporaries.
-  int temporaries_array_data[] = {0};
-  TfLiteIntArray* temporaries_array = IntArrayFromInts(temporaries_array_data);
 
   TfLiteNode node;
   node.inputs = inputs_array;
   node.outputs = outputs_array;
-  node.temporaries = temporaries_array;
   node.user_data = user_data;
   node.builtin_data = reinterpret_cast<void*>(conv_params);
   node.custom_initial_data = nullptr;
   node.custom_initial_data_size = 0;
-  node.delegate = nullptr;
 
-  TfLiteStatus prepare_status = registration->prepare(&context, &node);
-  if (prepare_status != kTfLiteOk) {
-    return prepare_status;
+  if (registration.prepare) {
+    TfLiteStatus prepare_status = registration.prepare(&context, &node);
+    if (prepare_status != kTfLiteOk) {
+      return prepare_status;
+    }
   }
 
-  // On xtensa-hifimini, clock() returns a cyle count. On x86, it returns a time
-  // based on CLOCKS_PER_SECOND.
-  clock_t start = clock();
-  TfLiteStatus invoke_status = registration->invoke(&context, &node);
-  printf("invoke took %ld cycles\n", clock() - start);
+  int32_t start = tflite::GetCurrentTimeTicks();
+  TfLiteStatus invoke_status = registration.invoke(&context, &node);
+  TF_LITE_REPORT_ERROR(reporter, "invoke took %d cycles\n",
+                       tflite::GetCurrentTimeTicks() - start);
 
-  if (registration->free) {
-    registration->free(&context, user_data);
+  if (registration.free) {
+    registration.free(&context, user_data);
   }
 
   if (invoke_status != kTfLiteOk) {
@@ -90,9 +84,9 @@ TfLiteStatus ValidateConvGoldens(TfLiteTensor* tensors, int tensors_size,
   int8_t* output_data = tensors[3].data.int8;
   for (int i = 0; i < output_length; ++i) {
     if (std::abs(expected_output_data[i] - output_data[i]) > tolerance) {
-      printf("output[%d] failed, was %f expected %f\n", i,
-             static_cast<float>(output_data[i]),
-             static_cast<float>(expected_output_data[i]));
+      TF_LITE_REPORT_ERROR(reporter, "output[%d] failed, was %d expected %d\n",
+                           i, static_cast<int>(output_data[i]),
+                           static_cast<int>(expected_output_data[i]));
     }
   }
   return kTfLiteOk;
@@ -103,6 +97,7 @@ TfLiteStatus ValidateConvGoldens(TfLiteTensor* tensors, int tensors_size,
 }  // namespace tflite
 
 int main() {
+  tflite::MicroErrorReporter reporter;
   const int input_shape[] = {4, 1, 1, 1, 32};
   const int filter_shape[] = {4, 32, 1, 1, 32};
   const int bias_shape[] = {1, 32};
@@ -156,11 +151,10 @@ int main() {
   // Output scale of 50 is needed to accomodate a float range of [-6400, 6350]
   float output_scale = 50.0f;
 
-  // Create per-tensor quantized int8 input tensor.
+  // Create per-tensor quantized int8_t input tensor.
   int8_t input_quantized[32];
   TfLiteTensor input_tensor = tflite::testing::CreateQuantizedTensor(
-      input_values, input_quantized, input_dims, input_scale, input_zero_point,
-      "input_tensor");
+      input_values, input_quantized, input_dims, input_scale, input_zero_point);
   // Set zero point and scale arrays with a single element for each.
   int input_zero_points[] = {1, input_zero_point};
   float input_scales[] = {1, input_scale};
@@ -169,11 +163,11 @@ int main() {
       tflite::testing::IntArrayFromInts(input_zero_points)};
   input_tensor.quantization = {kTfLiteAffineQuantization, &input_quant};
 
-  // Create per-tensor quantized int8 filter tensor.
+  // Create per-tensor quantized int8_t filter tensor.
   int8_t filter_quantized[32 * 32];
   TfLiteTensor filter_tensor = tflite::testing::CreateQuantizedTensor(
       filter_values, filter_quantized, filter_dims, filter_scale,
-      filter_zero_point, "filter_tensor");
+      filter_zero_point);
   // Set zero point and scale arrays with a single element for each.
   int filter_zero_points[] = {1, filter_zero_point};
   float filter_scales[] = {1, filter_scale};
@@ -182,12 +176,12 @@ int main() {
       tflite::testing::IntArrayFromInts(filter_zero_points)};
   filter_tensor.quantization = {kTfLiteAffineQuantization, &filter_quant};
 
-  // Create per-tensor quantized int32 bias tensor.
+  // Create per-tensor quantized int32_t bias tensor.
   int32_t bias_quantized[32];
   tflite::SymmetricQuantize(bias_values, bias_quantized, 32,
                             input_scale * output_scale);
-  TfLiteTensor bias_tensor = tflite::testing::CreateInt32Tensor(
-      bias_quantized, bias_dims, "bias_tensor");
+  TfLiteTensor bias_tensor =
+      tflite::testing::CreateInt32Tensor(bias_quantized, bias_dims);
 
   // There is a single zero point of 0, and a single scale of
   // input_scale * filter_scale.
@@ -198,11 +192,10 @@ int main() {
       tflite::testing::IntArrayFromInts(bias_zero_points)};
   bias_tensor.quantization = {kTfLiteAffineQuantization, &bias_quant};
 
-  // Create per-tensor quantized int8 output tensor.
+  // Create per-tensor quantized int8_t output tensor.
   int8_t output_quantized[32];
   TfLiteTensor output_tensor = tflite::testing::CreateQuantizedTensor(
-      output_quantized, output_dims, output_scale, output_zero_point,
-      "output_tensor");
+      output_quantized, output_dims, output_scale, output_zero_point);
   // Set zero point and scale arrays with a single element for each.
   int output_zero_points[] = {1, output_zero_point};
   float output_scales[] = {1, output_scale};
@@ -229,9 +222,9 @@ int main() {
   const int num_tensors = sizeof(tensors) / sizeof(TfLiteTensor);
   TfLiteStatus status = tflite::testing::ValidateConvGoldens(
       tensors, num_tensors, &conv_params, kQuantizationTolerance,
-      output_dims_count, golden_quantized);
+      output_dims_count, golden_quantized, &reporter);
   if (status != kTfLiteOk) {
-    printf("Model invoke failed\n");
+    TF_LITE_REPORT_ERROR(&reporter, "Model invoke failed\n");
   }
   return 0;
 }

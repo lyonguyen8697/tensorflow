@@ -1,5 +1,7 @@
-load("//tensorflow:tensorflow.bzl", "tf_py_test")
 load("//tensorflow:tensorflow.bzl", "cuda_py_test")
+
+# buildifier: disable=same-origin-load
+load("//tensorflow:tensorflow.bzl", "tf_py_test")
 
 # buildifier: disable=same-origin-load
 load("//tensorflow:tensorflow.bzl", "tf_python_pybind_extension")
@@ -28,6 +30,10 @@ cc_library(
         "pywrap_tensor_conversion.h",
         "pywrap_tfe.h",
     ],
+    copts = ["-fexceptions"],
+    features = [
+        "-use_header_modules",  # Required for pybind11
+    ],
     visibility = [
         "//learning/deepmind/courier:__subpackages__",
         "//tensorflow:internal",
@@ -40,6 +46,9 @@ cc_library(
         "//tensorflow/c/eager:c_api_internal",
         "//tensorflow/c/eager:dlpack",
         "//tensorflow/c/eager:tape",
+        "//tensorflow/c/eager:tfe_context_internal",
+        "//tensorflow/c/eager:tfe_op_internal",
+        "//tensorflow/c/eager:tfe_tensorhandle_internal",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core:protos_all_cc",
@@ -47,12 +56,16 @@ cc_library(
         "//tensorflow/core/platform:logging",
         "//tensorflow/core/platform:types",
         "//tensorflow/core/profiler/lib:traceme",
+        "//tensorflow/core/util:abstract_stack_trace",
         "//tensorflow/python:cpp_python_util",
         "//tensorflow/python:ndarray_tensor",
         "//tensorflow/python:ndarray_tensor_bridge",
         "//tensorflow/python:numpy_lib",
+        "//tensorflow/python:py_exception_registry",
         "//tensorflow/python:py_seq_tensor",
+        "//tensorflow/python:py_util",
         "//tensorflow/python:safe_ptr",
+        "//tensorflow/python:stack_trace",
         "//third_party/py/numpy:headers",
         "//third_party/python_runtime:headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -60,6 +73,7 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:variant",
+        "@pybind11",
     ],
 )
 
@@ -81,6 +95,7 @@ py_library(
     visibility = ["//tensorflow:internal"],
     deps = [
         ":backprop",
+        ":benchmarks_test_base",
         ":cancellation",
         ":context",
         ":core",
@@ -257,12 +272,13 @@ cuda_py_test(
     name = "profiler_test",
     srcs = ["profiler_test.py"],
     python_version = "PY3",
+    tags = ["no_rocm"],
     deps = [
         ":profiler",
         ":test",
         "//tensorflow/core/profiler/protobuf:trace_events_proto_py",
         "//tensorflow/python:constant_op",
-        "//tensorflow/python/profiler:traceme",
+        "//tensorflow/python/profiler:trace",
     ],
 )
 
@@ -330,6 +346,7 @@ cuda_py_test(
         "//tensorflow/python:embedding_ops",
         "//tensorflow/python:layers",
         "//tensorflow/python:math_ops",
+        "//tensorflow/python:memory_checker",
         "//tensorflow/python:nn_grad",
         "//tensorflow/python:nn_ops",
         "//tensorflow/python:random_ops",
@@ -426,6 +443,10 @@ cuda_py_test(
     srcs = ["function_test.py"],
     python_version = "PY3",
     shard_count = 15,
+    tags = [
+        "nogpu",  # TODO(b/162544929): segfault
+        "nomac",  # b/157056289
+    ],
     deps = [
         ":backprop",
         ":cancellation",
@@ -447,6 +468,7 @@ cuda_py_test(
         "//tensorflow/python:math_ops",
         "//tensorflow/python:random_seed",
         "//tensorflow/python:resource_variable_ops",
+        "//tensorflow/python:sendrecv_ops_gen",
         "//tensorflow/python:sparse_tensor",
         "//tensorflow/python:tensor_shape",
         "//tensorflow/python:tensor_spec",
@@ -544,6 +566,9 @@ py_library(
         "//tensorflow/python:graph_to_function_def",
         "//tensorflow/python:pywrap_tf_session",
         "//tensorflow/python:util",
+        "//tensorflow/python/ops/numpy_ops:numpy",
+        "//tensorflow/python/saved_model:save_context",
+        "//tensorflow/python/saved_model:save_options",
         "//third_party/py/numpy",
         "@six_archive//:six",
     ],
@@ -571,6 +596,7 @@ py_library(
         "//tensorflow/python:tensor_shape",
         "//tensorflow/python:unconnected_gradients",
         "//tensorflow/python:util",
+        "//tensorflow/python/ops/numpy_ops:numpy",
         "//tensorflow/python/ops/parallel_for:control_flow_ops",
         "@six_archive//:six",
     ],
@@ -597,6 +623,8 @@ py_library(
         "//tensorflow/python:platform",
         "//tensorflow/python:pywrap_tfe",
         "//tensorflow/python:util",
+        "//tensorflow/python/ops/numpy_ops:numpy",
+        "//tensorflow/python/ops/parallel_for:control_flow_ops",
     ],
 )
 
@@ -610,12 +638,22 @@ py_library(
     ],
 )
 
+py_library(
+    name = "benchmarks_test_base",
+    srcs = ["benchmarks_test_base.py"],
+    srcs_version = "PY2AND3",
+    visibility = ["//tensorflow:internal"],
+    deps = [":test"],
+)
+
 cuda_py_test(
     name = "benchmarks_test",
     srcs = ["benchmarks_test.py"],
     python_version = "PY3",
+    tfrt_enabled = True,
     deps = [
         ":backprop",
+        ":benchmarks_test_base",
         ":context",
         ":forwardprop",
         ":function",
@@ -634,6 +672,7 @@ cuda_py_test(
     python_version = "PY3",
     deps = [
         ":backprop",
+        ":benchmarks_test_base",
         ":context",
         ":forwardprop",
         ":function",
@@ -659,6 +698,7 @@ tf_py_test(
     deps = [
         ":backprop",
         ":context",
+        ":tape",
         ":test",
         "//tensorflow/python:array_ops",
         "//tensorflow/python:constant_op",
@@ -741,6 +781,7 @@ py_library(
         "//tensorflow/python:util",
         "//tensorflow/python:variable_scope",
         "//tensorflow/python:while_v2",  # TODO(b/118513001): Imported via control_flow_ops; remove.
+        "//tensorflow/python/profiler:trace",
         "//tensorflow/python/training/tracking:base",
     ],
 )
@@ -775,12 +816,15 @@ cuda_py_test(
     name = "def_function_test",
     srcs = ["def_function_test.py"],
     python_version = "PY3",
+    tfrt_enabled = True,
     deps = [
         ":def_function",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:constant_op",
         "//tensorflow/python:framework_ops",
         "//tensorflow/python/autograph/core",
+        "//tensorflow/python/saved_model:save_context",
+        "//tensorflow/python/saved_model:save_options",
         "@absl_py//absl/testing:parameterized",
     ],
 )
@@ -806,18 +850,24 @@ tf_py_test(
     ],
 )
 
-cuda_py_test(
+tf_xla_py_test(
     name = "def_function_xla_jit_test",
     srcs = ["def_function_xla_jit_test.py"],
+    disabled_backends = [
+        "cpu_ondemand",
+    ],
+    enable_mlir_bridge = True,
     python_version = "PY3",
     tags = [
         "no_mac",
+        "no_pip",
         "no_windows",
     ],
-    xla_enabled = True,
+    use_xla_device = False,
     deps = [
         ":backprop",
         ":def_function",
+        "//tensorflow/compiler/tests:xla_test",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python:constant_op",
         "//tensorflow/python:framework_ops",
@@ -941,7 +991,6 @@ cuda_py_test(
     shard_count = 8,
     tags = [
         "no_oss",  # This test launches local server
-        "notsan",  # TODO(b/152075365)
     ],
     deps = [
         "//tensorflow/python:array_ops",

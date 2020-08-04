@@ -14,9 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #define EIGEN_USE_THREADS
-// clang-format off
-#include "tensorflow/core/lib/bfloat16/bfloat16.h"
-// clang-format on
 #include "tensorflow/core/kernels/training_ops.h"
 
 #include <algorithm>  // NOLINT
@@ -26,6 +23,7 @@ limitations under the License.
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/kernels/training_op_helpers.h"
 #include "tensorflow/core/kernels/variable_ops.h"
+#include "tensorflow/core/lib/bfloat16/bfloat16.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/util/util.h"
 
@@ -727,12 +725,8 @@ class ApplyGradientDescentOp<SYCLDevice, T> : public OpKernel {
                           ApplyGradientDescentOp<D##Device, T>);
 #define REGISTER_CPU_KERNELS(T) REGISTER_KERNELS(CPU, T);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 // Forward declarations of the functor specializations for GPU.
@@ -747,9 +741,7 @@ namespace functor {
 DECLARE_GPU_SPEC(Eigen::half);
 DECLARE_GPU_SPEC(float);
 DECLARE_GPU_SPEC(double);
-#if !defined(TENSORFLOW_USE_NVCC) && \
-    !defined(TENSORFLOW_USE_ROCM)  // TODO(b/143684500): Eigen to support
-                                   // complex sqrt
+#ifndef TENSORFLOW_USE_NVCC  // TODO(b/143684500): Eigen to support complex sqrt
 DECLARE_GPU_SPEC(complex64);
 DECLARE_GPU_SPEC(complex128);
 #endif
@@ -759,9 +751,7 @@ DECLARE_GPU_SPEC(complex128);
 REGISTER_KERNELS(GPU, Eigen::half);
 REGISTER_KERNELS(GPU, float);
 REGISTER_KERNELS(GPU, double);
-#if !defined(TENSORFLOW_USE_NVCC) && \
-    !defined(TENSORFLOW_USE_ROCM)  // TODO(b/143684500): Eigen to support
-                                   // complex sqrt
+#ifndef TENSORFLOW_USE_NVCC  // TODO(b/143684500): Eigen to support complex sqrt
 REGISTER_KERNELS(GPU, complex64);
 REGISTER_KERNELS(GPU, complex128);
 #endif
@@ -902,12 +892,8 @@ class ApplyAdadeltaOp : public OpKernel {
                           ApplyAdadeltaOp<D##Device, T>);
 #define REGISTER_CPU_KERNELS(T) REGISTER_KERNELS(CPU, T);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 // Forward declarations of the functor specializations for GPU.
@@ -924,9 +910,7 @@ namespace functor {
 DECLARE_GPU_SPEC(Eigen::half);
 DECLARE_GPU_SPEC(float);
 DECLARE_GPU_SPEC(double);
-#if !defined(TENSORFLOW_USE_NVCC) && \
-    !defined(TENSORFLOW_USE_ROCM)  // TODO(b/143684500): Eigen to support
-                                   // complex sqrt
+#ifndef TENSORFLOW_USE_NVCC  // TODO(b/143684500): Eigen to support complex sqrt
 DECLARE_GPU_SPEC(complex64);
 DECLARE_GPU_SPEC(complex128);
 #endif
@@ -936,9 +920,7 @@ DECLARE_GPU_SPEC(complex128);
 REGISTER_KERNELS(GPU, Eigen::half);
 REGISTER_KERNELS(GPU, float);
 REGISTER_KERNELS(GPU, double);
-#if !defined(TENSORFLOW_USE_NVCC) && \
-    !defined(TENSORFLOW_USE_ROCM)  // TODO(b/143684500): Eigen to support
-                                   // complex sqrt
+#ifndef TENSORFLOW_USE_NVCC  // TODO(b/143684500): Eigen to support complex sqrt
 REGISTER_KERNELS(GPU, complex64);
 REGISTER_KERNELS(GPU, complex128);
 #endif
@@ -1097,12 +1079,8 @@ class SparseApplyAdadeltaOp : public OpKernel {
   REGISTER_KERNELS(T, int32);   \
   REGISTER_KERNELS(T, int64);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #undef REGISTER_CPU_KERNELS
 #undef REGISTER_KERNELS
@@ -1391,12 +1369,8 @@ class ApplyAdagradOp : public OpKernel {
                           ApplyAdagradOp<D##Device, T>);
 #define REGISTER_CPU_KERNELS(T) REGISTER_KERNELS(CPU, T);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 // Forward declarations of the functor specializations for GPU.
@@ -1411,9 +1385,7 @@ namespace functor {
 DECLARE_GPU_SPEC(Eigen::half);
 DECLARE_GPU_SPEC(float);
 DECLARE_GPU_SPEC(double);
-#if !defined(TENSORFLOW_USE_NVCC) && \
-    !defined(TENSORFLOW_USE_ROCM)  // TODO(b/143684500): Eigen to support
-                                   // complex sqrt
+#ifndef TENSORFLOW_USE_NVCC  // TODO(b/143684500): Eigen to support complex sqrt
 DECLARE_GPU_SPEC(complex64);
 DECLARE_GPU_SPEC(complex128);
 #endif
@@ -1423,9 +1395,7 @@ DECLARE_GPU_SPEC(complex128);
 REGISTER_KERNELS(GPU, Eigen::half);
 REGISTER_KERNELS(GPU, float);
 REGISTER_KERNELS(GPU, double);
-#if !defined(TENSORFLOW_USE_NVCC) && \
-    !defined(TENSORFLOW_USE_ROCM)  // TODO(b/143684500): Eigen to support
-                                   // complex sqrt
+#ifndef TENSORFLOW_USE_NVCC  // TODO(b/143684500): Eigen to support complex sqrt
 REGISTER_KERNELS(GPU, complex64);
 REGISTER_KERNELS(GPU, complex128);
 #endif
@@ -1504,12 +1474,8 @@ class ApplyAdagradV2Op : public OpKernel {
                           ApplyAdagradV2Op<D##Device, T>);
 #define REGISTER_CPU_KERNELS(T) REGISTER_KERNELS(CPU, T);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 // Forward declarations of the functor specializations for GPU.
@@ -1525,9 +1491,7 @@ namespace functor {
 DECLARE_GPU_SPEC(Eigen::half);
 DECLARE_GPU_SPEC(float);
 DECLARE_GPU_SPEC(double);
-#if !defined(TENSORFLOW_USE_NVCC) && \
-    !defined(TENSORFLOW_USE_ROCM)  // TODO(b/143684500): Eigen to support
-                                   // complex sqrt
+#ifndef TENSORFLOW_USE_NVCC  // TODO(b/143684500): Eigen to support complex sqrt
 DECLARE_GPU_SPEC(complex64);
 DECLARE_GPU_SPEC(complex128);
 #endif
@@ -1537,9 +1501,7 @@ DECLARE_GPU_SPEC(complex128);
 REGISTER_KERNELS(GPU, Eigen::half);
 REGISTER_KERNELS(GPU, float);
 REGISTER_KERNELS(GPU, double);
-#if !defined(TENSORFLOW_USE_NVCC) && \
-    !defined(TENSORFLOW_USE_ROCM)  // TODO(b/143684500): Eigen to support
-                                   // complex sqrt
+#ifndef TENSORFLOW_USE_NVCC  // TODO(b/143684500): Eigen to support complex sqrt
 REGISTER_KERNELS(GPU, complex64);
 REGISTER_KERNELS(GPU, complex128);
 #endif
@@ -1817,12 +1779,8 @@ class SparseApplyAdagradOp : public OpKernel {
   REGISTER_KERNELS(T, int32);   \
   REGISTER_KERNELS(T, int64);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #undef REGISTER_CPU_KERNELS
 #undef REGISTER_KERNELS
@@ -1992,12 +1950,8 @@ class SparseApplyAdagradV2Op : public OpKernel {
   REGISTER_KERNELS(T, int32);   \
   REGISTER_KERNELS(T, int64);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #undef REGISTER_CPU_KERNELS
 #undef REGISTER_KERNELS
@@ -3070,12 +3024,8 @@ class ApplyMomentumOp : public OpKernel {
                           ApplyMomentumOp<D##Device, T>);
 #define REGISTER_CPU_KERNELS(T) REGISTER_KERNELS(CPU, T);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 // Forward declarations of the functor specializations for GPU.
@@ -3225,12 +3175,8 @@ class SparseApplyMomentumOp : public OpKernel {
   REGISTER_KERNELS(T, int32);   \
   REGISTER_KERNELS(T, int64);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #undef REGISTER_CPU_KERNELS
 #undef REGISTER_KERNELS
@@ -3304,12 +3250,8 @@ class ApplyKerasMomentumOp : public OpKernel {
                           ApplyKerasMomentumOp<D##Device, T>);
 #define REGISTER_CPU_KERNELS(T) REGISTER_KERNELS(CPU, T);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 // Forward declarations of the functor specializations for GPU.
@@ -3439,12 +3381,9 @@ class SparseApplyKerasMomentumOp : public OpKernel {
   REGISTER_KERNELS(T, CPU, int32); \
   REGISTER_KERNELS(T, CPU, int64);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
+
 #undef REGISTER_CPU_KERNELS
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
@@ -3715,12 +3654,8 @@ class ApplyAdamOp<SYCLDevice, T> : public OpKernel {
                           ApplyAdamOp<D##Device, T>);
 #define REGISTER_CPU_KERNELS(T) REGISTER_KERNELS(CPU, T);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #ifdef TENSORFLOW_USE_SYCL
 #define REGISTER_SYCL_KERNELS(T) REGISTER_KERNELS(SYCL, T);
@@ -4242,12 +4177,8 @@ class ApplyCenteredRMSPropOp : public OpKernel {
                           ApplyCenteredRMSPropOp<D##Device, T>);
 #define REGISTER_CPU_KERNELS(T) REGISTER_KERNELS(CPU, T);
 
-TF_CALL_half(REGISTER_CPU_KERNELS);
-TF_CALL_bfloat16(REGISTER_CPU_KERNELS);
-TF_CALL_float(REGISTER_CPU_KERNELS);
-TF_CALL_double(REGISTER_CPU_KERNELS);
-TF_CALL_complex64(REGISTER_CPU_KERNELS);
-TF_CALL_complex128(REGISTER_CPU_KERNELS);
+TF_CALL_FLOAT_TYPES(REGISTER_CPU_KERNELS);
+TF_CALL_COMPLEX_TYPES(REGISTER_CPU_KERNELS);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 // Forward declarations of the functor specializations for GPU.
@@ -4275,9 +4206,7 @@ namespace functor {
 DECLARE_GPU_SPEC(Eigen::half);
 DECLARE_GPU_SPEC(float);
 DECLARE_GPU_SPEC(double);
-#if !defined(TENSORFLOW_USE_NVCC) && \
-    !defined(TENSORFLOW_USE_ROCM)  // TODO(b/143684500): Eigen to support
-                                   // complex sqrt
+#ifndef TENSORFLOW_USE_NVCC  // TODO(b/143684500): Eigen to support complex sqrt
 DECLARE_GPU_SPEC(complex64);
 DECLARE_GPU_SPEC(complex128);
 #endif
@@ -4287,9 +4216,7 @@ DECLARE_GPU_SPEC(complex128);
 REGISTER_KERNELS(GPU, Eigen::half);
 REGISTER_KERNELS(GPU, float);
 REGISTER_KERNELS(GPU, double);
-#if !defined(TENSORFLOW_USE_NVCC) && \
-    !defined(TENSORFLOW_USE_ROCM)  // TODO(b/143684500): Eigen to support
-                                   // complex sqrt
+#ifndef TENSORFLOW_USE_NVCC  // TODO(b/143684500): Eigen to support complex sqrt
 REGISTER_KERNELS(GPU, complex64);
 REGISTER_KERNELS(GPU, complex128);
 #endif

@@ -41,50 +41,21 @@ limitations under the License.
 #include "mlir/IR/Types.h"  // from @llvm-project
 #include "mlir/IR/Value.h"  // from @llvm-project
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
-#include "mlir/Support/STLExtras.h"  // from @llvm-project
 #include "mlir/Transforms/FoldUtils.h"  // from @llvm-project
 #include "mlir/Transforms/InliningUtils.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_types.h"
 
 namespace mlir {
 namespace tf_executor {
-namespace {
-
-// If the given tensor has elements of type with subtypes, then returns a new
-// type after dropping subtypes info. Otherwise, returns the original type as
-// is.
-ShapedType DropTypeSubTypes(ShapedType ty) {
-  Type element_ty = ty.getElementType();
-  auto subtype_ty = element_ty.dyn_cast<TF::TensorFlowTypeWithSubtype>();
-  if (!subtype_ty) return ty;
-
-  Type default_ty = GetDefaultTypeOf(subtype_ty);
-  if (ty.hasRank()) return RankedTensorType::get(ty.getShape(), default_ty);
-
-  return UnrankedTensorType::get(default_ty);
-}
-
-// If the given tensor has elements of type ref, then returns a new type
-// of the shape, but corresponding non-ref type as element type. Otherwise,
-// returns the original type as is.
-ShapedType DropRefType(ShapedType ty) {
-  Type element_ty = ty.getElementType();
-  auto ref_ty = element_ty.dyn_cast<TF::TensorFlowRefType>();
-  if (!ref_ty) return ty;
-
-  Type default_ty = GetDefaultTypeOf(ref_ty);
-  if (ty.hasRank()) return RankedTensorType::get(ty.getShape(), default_ty);
-
-  return UnrankedTensorType::get(default_ty);
-}
-
-}  // namespace
 
 //===----------------------------------------------------------------------===//
 // TF Executor Dialect
 //===----------------------------------------------------------------------===//
 
 namespace {
+
+using TF::DropRefType;
+using TF::DropTypeSubTypes;
 
 struct TensorFlowExecutorInlinerInterface : public DialectInlinerInterface {
   using DialectInlinerInterface::DialectInlinerInterface;
@@ -100,7 +71,7 @@ struct TensorFlowExecutorInlinerInterface : public DialectInlinerInterface {
     // Allow inlining into tf.island regions if the incoming region has a single
     // block.
     return llvm::isa<tf_executor::IslandOp>(dest->getParentOp()) &&
-           std::next(src->begin()) == src->end();
+           llvm::hasSingleElement(*src);
   }
 };
 
@@ -219,14 +190,15 @@ LogicalResult Verify(GraphOp graph) {
   for (int i : llvm::seq<int>(0, fetch.getNumOperands())) {
     Value operand = fetch.getOperand(i);
     // Break out of the loop at the first control operand encountered.
+    const int64_t num_results = graph.getNumResults();
     if (operand.getType().isa<ControlType>()) {
-      if (i != graph.getNumResults())
+      if (i != num_results)
         return fetch.emitOpError()
                << "operand #" << i
                << " is a control type, can't be bound to a graph result";
       break;
     }
-    if (i >= graph.getNumResults())
+    if (i >= num_results)
       return fetch.emitOpError()
              << "operand #" << i << " does not have a graph results to bind";
     if (graph.getResult(i).getType() != operand.getType())
@@ -249,12 +221,12 @@ ParseResult ParseGraphOp(OpAsmParser &parser, OperationState &result) {
   Region &body = *result.addRegion();
   if (parser.parseRegion(body, llvm::None, llvm::None)) return failure();
 
-  if (body.getBlocks().size() > 1)
-    return parser.emitError(loc) << "expects a single block region";
-
   // Ensure that the region is well formed: it contains at least a block with
   // a FetchOp terminator.
   GraphOp::ensureTerminator(body, parser.getBuilder(), result.location);
+
+  if (!llvm::hasSingleElement(body))
+    return parser.emitError(loc) << "expects a single block region";
 
   // Get the results type from the terminator type inside the graph.
   Operation &fetch = body.back().back();
@@ -318,7 +290,7 @@ YieldOp IslandOp::GetYield() { return llvm::cast<YieldOp>(GetBody().back()); }
 // operation results are perfectly forwarded to the islands yield.
 bool IslandOp::WrapsSingleOp() {
   auto body = GetBody().without_terminator();
-  if (!has_single_element(body)) return false;
+  if (!hasSingleElement(body)) return false;
 
   Operation &wrapped_op = *body.begin();
   YieldOp yield = GetYield();
@@ -330,8 +302,8 @@ bool IslandOp::WrapsSingleOp() {
 namespace {
 
 LogicalResult Verify(IslandOp island) {
-  if (island.GetBody().empty())
-    return island.emitOpError() << "expects a non-empty body";
+  if (!island.GetBody().args_empty())
+    return island.emitOpError() << "expects body without any arguments";
 
   Operation &yield = island.GetBody().back();
   if (!isa<YieldOp>(yield))
@@ -340,7 +312,8 @@ LogicalResult Verify(IslandOp island) {
 
   // Ensure that the yield terminator operands matches the island results type.
   int result_count = island.getNumResults() - 1;  // -1 for the control token
-  if (yield.getNumOperands() != result_count)
+  const int num_operands = yield.getNumOperands();
+  if (num_operands != result_count)
     return yield.emitOpError()
            << "has " << yield.getNumOperands()
            << " operand, but island returns " << result_count;
@@ -475,7 +448,7 @@ namespace {
 ParseResult ParseSwitchOp(OpAsmParser &parser, OperationState &result) {
   SmallVector<OpAsmParser::OperandType, 2> op_infos;
   SmallVector<Type, 1> types;
-  if (parser.parseOperandList(op_infos, 2) || parser.parseColonTypeList(types))
+  if (parser.parseOperandList(op_infos) || parser.parseColonTypeList(types))
     return failure();
   if (types.size() != 1)
     return parser.emitError(parser.getNameLoc())
@@ -487,12 +460,15 @@ ParseResult ParseSwitchOp(OpAsmParser &parser, OperationState &result) {
   // type).
   if (types.front().isa<FunctionType>()) {
     FunctionType type = types.front().cast<FunctionType>();
-    if (type.getNumInputs() != 2)
+    if (type.getNumInputs() < 2)
       return parser.emitError(parser.getNameLoc())
              << " expects a single data type and a predicate";
     result.types.assign(type.getResults().begin(), type.getResults().end());
     types.assign(type.getInputs().begin(), type.getInputs().end());
   } else {
+    if (op_infos.size() < 2)
+      return parser.emitError(parser.getNameLoc())
+             << " expects a single data type and a predicate";
     Type control_type = ControlType::get(parser.getBuilder().getContext());
     result.types.append(2, types[0]);
     result.types.push_back(control_type);
@@ -837,11 +813,13 @@ ParseResult ParseEnterOp(OpAsmParser &parser, OperationState &result) {
   // fully qualified) or a short form with a single type (in which case the data
   // input and the outputs are all using this type).
   if (FunctionType type = types.front().dyn_cast<FunctionType>()) {
-    if (type.getNumInputs() != 1)
-      return parser.emitError(parser.getNameLoc())
-             << " expects a single data type";
-    result.types.assign(type.getResults().begin(), type.getResults().end());
-    types.assign(type.getInputs().begin(), type.getInputs().end());
+    // One data input, and any number of control inputs.
+    if (type.getNumInputs() >= 1) {
+      result.types.assign(type.getResults().begin(), type.getResults().end());
+      types.assign(type.getInputs().begin(), type.getInputs().end());
+    } else {
+      return parser.emitError(parser.getNameLoc()) << " expects a data input";
+    }
   } else {
     Type control_type = ControlType::get(context);
     types.append(op_infos.size() - 1, control_type);

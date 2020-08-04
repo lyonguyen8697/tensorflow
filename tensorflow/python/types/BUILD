@@ -23,9 +23,29 @@ py_strict_library(
     srcs = [
         "__init__.py",
         "core.py",
+        "distribute.py",
+        "internal.py",
     ],
     srcs_version = "PY2AND3",
-    visibility = ["//tensorflow:__subpackages__"],
-    deps = [
+    visibility = [
+        "//tensorflow:__subpackages__",
+        "//tensorflow:types_whitelist",
     ],
+    deps = [
+        ":doc_typealias",
+        "//tensorflow/python:tf_export",
+        "//third_party/py/numpy",
+    ],
+)
+
+py_strict_library(
+    name = "doc_typealias",
+    srcs = [
+        "doc_typealias.py",
+    ],
+    srcs_version = "PY2AND3",
+    visibility = [
+        "//tensorflow:__subpackages__",
+    ],
+    deps = [],
 )

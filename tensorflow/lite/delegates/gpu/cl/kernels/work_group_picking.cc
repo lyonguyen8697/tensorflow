@@ -80,9 +80,12 @@ absl::Status GetBestWorkGroupAlignedToGrid(const TuningParameters& params,
                                            const int3& grid,
                                            int3* best_work_group) {
   std::vector<int3> work_groups;
+  int3 max_wg_size;
+  max_wg_size.x = params.info->max_work_group_size_x;
+  max_wg_size.y = params.info->max_work_group_size_y;
+  max_wg_size.z = params.info->max_work_group_size_z;
   RETURN_IF_ERROR(GenerateWorkGroupSizesAlignedToGrid(
-      grid, params.info->max_work_group_sizes, kernel.GetMaxWorkGroupSize(),
-      &work_groups));
+      grid, max_wg_size, kernel.GetMaxWorkGroupSize(), &work_groups));
   int best_work_group_index;
   RETURN_IF_ERROR(params.queue->GetBestWorkGroupIndex(
       kernel, *params.info, grid, work_groups, &best_work_group_index));
@@ -187,7 +190,7 @@ int3 GetWorkGroupXY128Simple(const int3& grid) { return int3(16, 8, 1); }
 int3 GetWorkGroup(const int3& grid, int max_size) {
   int wg_z = GetBiggestDividerWithPriority(grid.z, 8);
   int wg_xy_size = max_size / wg_z;
-  int wg_x = std::min(IntegralDivideRoundUp(grid.x, 2), wg_xy_size);
+  int wg_x = std::min(DivideRoundUp(grid.x, 2), wg_xy_size);
   int wg_y = std::min(wg_xy_size / wg_x, grid.y);
   return int3(wg_x, wg_y, wg_z);
 }
@@ -231,12 +234,12 @@ absl::Status GetBestWorkGroupXY128Linear(const TuningParameters& params,
 }
 
 bool XY128RequiresMoreWorkGroupsThenXY128Linear(int width, int height) {
-  int planar_work_groups = IntegralDivideRoundUp(width * height, 128);
+  int planar_work_groups = DivideRoundUp(width * height, 128);
   auto base_work_groups = Get2DWorkgroupsEqualTo128();
   bool have_equal_work_groups = false;
   for (auto& work_group : base_work_groups) {
-    int x_groups = IntegralDivideRoundUp(width, work_group.x);
-    int y_groups = IntegralDivideRoundUp(height, work_group.y);
+    int x_groups = DivideRoundUp(width, work_group.x);
+    int y_groups = DivideRoundUp(height, work_group.y);
     int xy_groups = x_groups * y_groups;
     if (xy_groups == planar_work_groups) {
       have_equal_work_groups = true;
@@ -268,10 +271,10 @@ absl::Status GetBestWorkGroupConv(const TuningParameters& params,
   switch (params.tuning_type) {
     case TuningType::FAST: {
       int max_z_size = 16;
-      if (params.info->vendor == Vendor::QUALCOMM) {
+      if (params.info->IsAdreno()) {
         max_z_size = params.info->adreno_info.gpu_version < 400 ? 16 : 64;
       }
-      max_z_size = std::min(max_z_size, params.info->max_work_group_sizes.z);
+      max_z_size = std::min(max_z_size, params.info->max_work_group_size_z);
       *best_work_group =
           GetWorkGroupConv(grid, kernel.GetMaxWorkGroupSize(), max_z_size);
       return absl::OkStatus();

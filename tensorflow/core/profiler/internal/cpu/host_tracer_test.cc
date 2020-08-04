@@ -12,17 +12,23 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#include <memory>
+#include <ostream>
 #include <string>
 
 #include <gmock/gmock.h>
-#include <gtest/gtest.h>
+#include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "tensorflow/core/framework/step_stats.pb.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/platform/env.h"
+#include "tensorflow/core/platform/status.h"
+#include "tensorflow/core/platform/test.h"
+#include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/profiler/internal/profiler_interface.h"
 #include "tensorflow/core/profiler/lib/profiler_session.h"
 #include "tensorflow/core/profiler/lib/traceme.h"
+#include "tensorflow/core/profiler/profiler_options.pb.h"
 #include "tensorflow/core/profiler/protobuf/xplane.pb.h"
 #include "tensorflow/core/profiler/utils/xplane_schema.h"
 #include "tensorflow/core/profiler/utils/xplane_visitor.h"
@@ -38,13 +44,13 @@ namespace {
 
 using ::testing::UnorderedElementsAre;
 
-NodeExecStats MakeNodeStats(const string& name, uint32 thread_id,
-                            const string& label = "") {
+NodeExecStats MakeNodeStats(absl::string_view name, uint32 thread_id,
+                            absl::string_view label = "") {
   NodeExecStats ns;
-  ns.set_node_name(name);
+  ns.set_node_name(std::string(name));
   ns.set_thread_id(thread_id);
   if (!label.empty()) {
-    ns.set_timeline_label(label);
+    ns.set_timeline_label(std::string(label));
   }
   return ns;
 }
@@ -109,7 +115,7 @@ TEST(HostTracerTest, CollectsTraceMeEventsAsRunMetadata) {
 
 TEST(HostTracerTest, CollectsTraceMeEventsAsXSpace) {
   uint32 thread_id;
-  string thread_name = "MyThreadName";
+  std::string thread_name = "MyThreadName";
   XSpace space;
 
   // We start a thread with a known and controled name. As of the time of
@@ -132,6 +138,8 @@ TEST(HostTracerTest, CollectsTraceMeEventsAsXSpace) {
         { TraceMe traceme("good#key1=value1#"); }
         { TraceMe traceme("morning#key1=value1,key2=value2#"); }
         { TraceMe traceme("incomplete#key1=value1,key2#"); }
+        // Special cases for tf.data
+        { TraceMe traceme("Iterator::XXX::YYY::ParallelMap"); }
         TF_ASSERT_OK(tracer->Stop());
 
         TF_ASSERT_OK(tracer->CollectData(&space));
@@ -142,14 +150,14 @@ TEST(HostTracerTest, CollectsTraceMeEventsAsXSpace) {
   ASSERT_EQ(space.planes_size(), 1);
   const auto& plane = space.planes(0);
   XPlaneVisitor xplane(&plane);
-  ASSERT_EQ(plane.name(), kHostThreads);
+  ASSERT_EQ(plane.name(), kHostThreadsPlaneName);
   ASSERT_EQ(plane.lines_size(), 1);
-  ASSERT_EQ(plane.event_metadata_size(), 6);
+  ASSERT_EQ(plane.event_metadata_size(), 7);
   ASSERT_EQ(plane.stat_metadata_size(), 2);
   const auto& line = plane.lines(0);
   EXPECT_EQ(line.id(), thread_id);
   EXPECT_EQ(line.name(), thread_name);
-  ASSERT_EQ(line.events_size(), 6);
+  ASSERT_EQ(line.events_size(), 7);
   const auto& events = line.events();
 
   XEventVisitor e0(&xplane, &line, &events[0]);
@@ -208,12 +216,12 @@ TEST(HostTracerTest, CollectsTraceMeEventsAsXSpace) {
     ASSERT_TRUE(value1 && !value2);  // One of the stat key is present.
     EXPECT_EQ(*value1, "value1");    // The stat value is expected.
   }
-#if 0
-  EXPECT_EQ(events[5].metadata_id(), 6);
-  EXPECT_EQ(event_metadata.at(6).name(), "incomplete");
-  ASSERT_EQ(events[5].stats_size(), 1);
-  EXPECT_EQ(GetXStatString(events[5].stats(0), plane), "value1");
-#endif
+
+  // Dataset Ops will trim intermediate namespace.
+  XEventVisitor e6(&xplane, &line, &events[6]);
+  EXPECT_EQ(e6.Name(), "Iterator::XXX::YYY::ParallelMap");
+
+  EXPECT_EQ(e6.DisplayName(), "Iterator::ParallelMap");
 }
 
 }  // namespace

@@ -102,8 +102,10 @@ public final class Interpreter implements AutoCloseable {
      * Sets whether to allow float16 precision for FP32 calculation when possible. Defaults to false
      * (disallow).
      *
-     * <p>WARNING: This is an experimental API and subject to change.
+     * @deprecated Prefer using {@link
+     *     org.tensorflow.lite.nnapi.NnApiDelegate.Options#setAllowFp16(boolean enable)}.
      */
+    @Deprecated
     public Options setAllowFp16PrecisionForFp32(boolean allow) {
       this.allowFp16PrecisionForFp32 = allow;
       return this;
@@ -135,10 +137,37 @@ public final class Interpreter implements AutoCloseable {
       return this;
     }
 
+    /**
+     * Experimental: Enable an optimized set of floating point CPU kernels (provided by XNNPACK).
+     *
+     * <p>Enabling this flag will enable use of a new, highly optimized set of CPU kernels provided
+     * via the XNNPACK delegate. Currently, this is restricted to a subset of floating point
+     * operations. Eventually, we plan to enable this by default, as it can provide significant
+     * peformance benefits for many classes of floating point models. See
+     * https://github.com/tensorflow/tensorflow/blob/master/tensorflow/lite/delegates/xnnpack/README.md
+     * for more details.
+     *
+     * <p>Things to keep in mind when enabling this flag:
+     *
+     * <ul>
+     *   <li>Startup time and resize time may increase.
+     *   <li>Baseline memory consumption may increase.
+     *   <li>Compatibility with other delegates (e.g., GPU) has not been fully validated.
+     *   <li>Quantized models will not see any benefit.
+     * </ul>
+     *
+     * <p>WARNING: This is an experimental interface that is subject to change.
+     */
+    public Options setUseXNNPACK(boolean useXNNPACK) {
+      this.useXNNPACK = useXNNPACK;
+      return this;
+    }
+
     int numThreads = -1;
     Boolean useNNAPI;
     Boolean allowFp16PrecisionForFp32;
     Boolean allowBufferHandleOutput;
+    Boolean useXNNPACK;
     final List<Delegate> delegates = new ArrayList<>();
   }
 
@@ -252,6 +281,8 @@ public final class Interpreter implements AutoCloseable {
    *   <li>{@link LongBuffer} - compatible with int64 Tensors.
    * </ul>
    *
+   * Note that boolean types are only supported as arrays, not {@link Buffer}s, or as scalar inputs.
+   *
    * @param input an array or multidimensional array, or a {@link Buffer} of primitive types
    *     including int, float, long, and byte. {@link Buffer} is the preferred way to pass large
    *     input data for primitive types, whereas string types require using the (multi-dimensional)
@@ -289,6 +320,8 @@ public final class Interpreter implements AutoCloseable {
    *   <li>{@link IntBuffer} - compatible with int32 Tensors.
    *   <li>{@link LongBuffer} - compatible with int64 Tensors.
    * </ul>
+   *
+   * Note that boolean types are only supported as arrays, not {@link Buffer}s, or as scalar inputs.
    *
    * <p>Note: {@code null} values for invididual elements of {@code inputs} and {@code outputs} is
    * allowed only if the caller is using a {@link Delegate} that allows buffer handle interop, and
@@ -348,7 +381,22 @@ public final class Interpreter implements AutoCloseable {
    */
   public void resizeInput(int idx, @NonNull int[] dims) {
     checkNotClosed();
-    wrapper.resizeInput(idx, dims);
+    wrapper.resizeInput(idx, dims, false);
+  }
+
+  /**
+   * Resizes idx-th input of the native model to the given dims.
+   *
+   * <p>When `strict` is True, only unknown dimensions can be resized. Unknown dimensions are
+   * indicated as `-1` in the array returned by `Tensor.shapeSignature()`.
+   *
+   * @throws IllegalArgumentException if {@code idx} is negtive or is not smaller than the number of
+   *     model inputs; or if error occurs when resizing the idx-th input. Additionally, the error
+   *     occurs when attempting to resize a tensor with fixed dimensions when `struct` is True.
+   */
+  public void resizeInput(int idx, @NonNull int[] dims, boolean strict) {
+    checkNotClosed();
+    wrapper.resizeInput(idx, dims, strict);
   }
 
   /** Gets the number of input tensors. */
@@ -476,6 +524,11 @@ public final class Interpreter implements AutoCloseable {
     wrapper.resetVariableTensors();
   }
 
+  int getExecutionPlanLength() {
+    checkNotClosed();
+    return wrapper.getExecutionPlanLength();
+  }
+
   /** Release resources associated with the {@code Interpreter}. */
   @Override
   public void close() {
@@ -485,6 +538,8 @@ public final class Interpreter implements AutoCloseable {
     }
   }
 
+  // for Object.finalize, see https://bugs.openjdk.java.net/browse/JDK-8165641
+  @SuppressWarnings("deprecation")
   @Override
   protected void finalize() throws Throwable {
     try {

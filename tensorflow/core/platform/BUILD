@@ -44,7 +44,6 @@ load(
     "tf_cc_tests",
     "tf_copts",  # @unused
     "tf_cuda_library",
-    "tf_portable_full_lite_protos",
 )
 load(
     "@local_config_rocm//rocm:build_defs.bzl",
@@ -86,6 +85,11 @@ exports_files(
         "mutex.h",
         "net.h",
         "numa.h",
+        "profile_utils/android_armv7a_cpu_utils_helper.h",
+        "profile_utils/cpu_utils.cc",
+        "profile_utils/cpu_utils.h",
+        "profile_utils/i_cpu_utils_helper.h",
+        "ram_file_system.h",
         "resource_loader.h",
         "resource.h",
         "snappy.h",
@@ -357,6 +361,8 @@ filegroup(
 cc_library(
     name = "mutex",
     textual_hdrs = ["mutex.h"],
+    # TODO(b/161569340): Short-term fix. Remove this visibility rule.
+    visibility = ["//tensorflow:__subpackages__"],
     deps = tf_platform_deps("mutex"),
 )
 
@@ -379,6 +385,15 @@ cc_library(
     hdrs = ["null_file_system.h"],
     deps = [
         ":env",
+    ],
+)
+
+py_test(
+    name = "ram_file_system_test",
+    srcs = ["ram_file_system_test.py"],
+    python_version = "PY3",
+    deps = [
+        "//tensorflow:tensorflow_py",
     ],
 )
 
@@ -462,10 +477,6 @@ cc_library(
         "protobuf_util.cc",
     ],
     hdrs = ["protobuf.h"],
-    defines = tf_portable_full_lite_protos(
-        full = [],
-        lite = ["TENSORFLOW_LITE_PROTOS"],
-    ),
     deps = [
         ":platform",
         ":types",
@@ -616,7 +627,7 @@ cc_library(
         ":stringpiece",
         ":stringprintf",
         ":types",
-        "//tensorflow/core:error_codes_proto_impl_cc",
+        "//tensorflow/core/protobuf:error_codes_proto_impl_cc",
         "@com_google_absl//absl/base",
     ],
 )
@@ -669,6 +680,7 @@ cc_library(
 cc_library(
     name = "strong_hash",
     hdrs = ["strong_hash.h"],
+    visibility = ["//visibility:public"],
     deps = [
         ":platform",
         ":types",
@@ -756,9 +768,19 @@ cc_library(
     ],
 )
 
+filegroup(
+    name = "ctstring",
+    srcs = [
+        "ctstring.h",
+        "ctstring_internal.h",
+    ],
+)
+
 cc_library(
     name = "types",
     hdrs = ["types.h"],
+    # TODO(b/161569340): Short-term fix. Remove this visibility rule.
+    visibility = ["//tensorflow:__subpackages__"],
     deps = [
         ":platform",
         ":tstring",
@@ -930,6 +952,39 @@ cc_library(
         "@com_google_absl//absl/strings",
     ],
     alwayslink = 1,
+)
+
+cc_library(
+    name = "tf32_utils",
+    srcs = ["tf32_utils.cc"],
+    hdrs = ["tf32_utils.h"],
+    copts = tf_copts(),
+    alwayslink = 1,
+)
+
+cc_library(
+    name = "profile_utils_cpu_utils",
+    srcs = [
+        "profile_utils/android_armv7a_cpu_utils_helper.h",
+        "profile_utils/cpu_utils.cc",
+        "profile_utils/i_cpu_utils_helper.h",
+    ],
+    hdrs = [
+        "profile_utils/cpu_utils.h",
+    ],
+    copts = tf_copts(),
+    deps = [
+        ":logging",
+        ":macros",
+        ":types",
+        "@com_google_absl//absl/base",
+    ],
+    alwayslink = 1,
+)
+
+filegroup(
+    name = "tf32_hdr",
+    srcs = ["tf32_utils.h"],
 )
 
 tf_cc_tests(
@@ -1293,6 +1348,7 @@ filegroup(
         "profile_utils/cpu_utils.h",
         "profile_utils/i_cpu_utils_helper.h",
         "protobuf.h",
+        "ram_file_system.h",
         "random.h",
         "resource.h",
         "stacktrace.h",
@@ -1466,6 +1522,7 @@ filegroup(
         "abi.h",
         "blocking_counter.h",
         "byte_order.h",
+        "casts.h",
         "coding.cc",
         "coding.h",
         "context.h",
@@ -1507,9 +1564,11 @@ filegroup(
         "protobuf.cc",
         "protobuf.h",
         "protobuf_util.cc",
+        "ram_file_system.h",
         "raw_coding.h",
         "refcount.h",
         "resource.h",
+        "regexp.h",
         "scanner.cc",
         "scanner.h",
         "setround.cc",
@@ -1550,7 +1609,6 @@ filegroup(
     srcs = [
         "base64.cc",
         "base64.h",
-        "casts.h",
         "cpu_feature_guard.cc",
         "cpu_feature_guard.h",
         "fingerprint.h",
@@ -1606,7 +1664,6 @@ filegroup(
     srcs = [
         "profile_utils/android_armv7a_cpu_utils_helper.cc",
         "profile_utils/clock_cycle_profiler.cc",
-        "profile_utils/cpu_utils.cc",
     ],
     visibility = ["//tensorflow/core:__pkg__"],
 )

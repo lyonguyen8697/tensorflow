@@ -17,20 +17,22 @@ limitations under the License.
 
 #include "tensorflow/c/c_api.h"
 #include "tensorflow/c/eager/c_api.h"
-#include "tensorflow/c/eager/c_api_internal.h"
+#include "tensorflow/c/eager/tfe_tensor_debug_info_internal.h"
+#include "tensorflow/c/eager/tfe_tensorhandle_internal.h"
+#include "tensorflow/c/tf_status_internal.h"
 #include "tensorflow/core/common_runtime/eager/tensor_handle.h"
+#include "tensorflow/core/platform/status.h"
 #ifdef TENSORFLOW_EAGER_USE_XLA
 #include "tensorflow/compiler/jit/xla_device.h"
 #endif  // TENSORFLOW_EAGER_USE_XLA
 
-using tensorflow::int64;
 using tensorflow::string;
 
 namespace {
 
-std::vector<int64> TensorShapeAsVector(const tensorflow::TensorHandle& handle,
-                                       tensorflow::Status* status) {
-  std::vector<int64> shape;
+std::vector<tensorflow::int64> TensorShapeAsVector(
+    const tensorflow::TensorHandle& handle, tensorflow::Status* status) {
+  std::vector<tensorflow::int64> shape;
   int rank = -1;
   *status = handle.NumDims(&rank);
   if (!status->ok()) {
@@ -54,7 +56,8 @@ extern "C" {
 
 TF_CAPI_EXPORT extern TFE_TensorDebugInfo* TFE_TensorHandleTensorDebugInfo(
     TFE_TensorHandle* h, TF_Status* status) {
-  tensorflow::TensorHandle* handle = TensorHandleFromInterface(h->handle);
+  tensorflow::TensorHandle* handle =
+      TensorHandleFromInterface(tensorflow::unwrap(h));
   const tensorflow::Tensor* tensor;
   status->status = handle->Tensor(&tensor);
   if (!status->status.ok()) {
@@ -75,7 +78,7 @@ TF_CAPI_EXPORT extern TFE_TensorDebugInfo* TFE_TensorHandleTensorDebugInfo(
       return nullptr;
     }
     if (VLOG_IS_ON(3)) {
-      std::vector<int64> shape_to_log =
+      std::vector<tensorflow::int64> shape_to_log =
           TensorShapeAsVector(*handle, &status->status);
       if (!status->status.ok()) {
         // Ignore the status here as we are simply logging.
@@ -124,14 +127,14 @@ TF_CAPI_EXPORT extern TFE_TensorDebugInfo* TFE_TensorHandleTensorDebugInfo(
     }
 
     int rank = padded_shape.dimensions_size();
-    std::vector<int64> dev_dims;
+    std::vector<tensorflow::int64> dev_dims;
     dev_dims.reserve(rank);
     if (rank == 1) {
       // Rank 1 tensors might not have padded_shape.layout.minor_to_major set,
       dev_dims.push_back(padded_shape.dimensions(0));
     } else {
       for (int i = rank - 1; i >= 0; --i) {
-        int64 dim_index = padded_shape.layout().minor_to_major(i);
+        tensorflow::int64 dim_index = padded_shape.layout().minor_to_major(i);
         dev_dims.push_back(padded_shape.dimensions(dim_index));
       }
     }
@@ -142,7 +145,8 @@ TF_CAPI_EXPORT extern TFE_TensorDebugInfo* TFE_TensorHandleTensorDebugInfo(
 
   // If the tensor is not an XLA tensor, the device shape is
   // the same as regular tensor shape.
-  std::vector<int64> dev_dims = TensorShapeAsVector(*handle, &status->status);
+  std::vector<tensorflow::int64> dev_dims =
+      TensorShapeAsVector(*handle, &status->status);
   if (!status->status.ok()) {
     return nullptr;
   }

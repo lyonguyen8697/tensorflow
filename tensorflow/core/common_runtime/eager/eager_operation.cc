@@ -15,7 +15,9 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/eager/eager_operation.h"
 
 #include "absl/types/span.h"
-#include "tensorflow/c/eager/tensor_handle_interface.h"
+#include "tensorflow/c/eager/abstract_operation.h"
+#include "tensorflow/c/eager/abstract_tensor_handle.h"
+#include "tensorflow/c/eager/immediate_execution_tensor_handle.h"
 #include "tensorflow/c/tf_tensor_internal.h"
 #include "tensorflow/core/common_runtime/eager/attr_builder.h"
 #include "tensorflow/core/common_runtime/input_colocation_exemption_registry.h"
@@ -36,11 +38,10 @@ void EagerOperation::Clear() {
   ClearInferenceState();
 }
 
-const string& EagerOperation::DeviceName() const {
-  VariantDevice variant_device =
-      (Device() == kVariantDeviceNull) ? EagerContext().HostCPU() : Device();
-  return absl::visit([](auto* d) -> const string& { return d->name(); },
-                     variant_device);
+Status EagerOperation::SetAttrValue(const char* attr_name,
+                                    const AttrValue& value) {
+  MutableAttrs()->Set(attr_name, value);
+  return Status::OK();
 }
 
 Status EagerOperation::SetAttrString(const char* attr_name, const char* data,
@@ -92,8 +93,8 @@ Status EagerOperation::SetAttrShape(const char* attr_name, const int64_t* dims,
   return Status::OK();
 }
 
-Status EagerOperation::SetAttrFunction(
-    const char* attr_name, const AbstractOperationInterface* value) {
+Status EagerOperation::SetAttrFunction(const char* attr_name,
+                                       const AbstractOperation* value) {
   AttrValue attr_value;
   NameAttrList* func = attr_value.mutable_func();
   func->set_name(value->Name());
@@ -195,8 +196,7 @@ Status EagerOperation::SetAttrShapeList(const char* attr_name,
 }
 
 Status EagerOperation::SetAttrFunctionList(
-    const char* attr_name,
-    absl::Span<const AbstractOperationInterface*> values) {
+    const char* attr_name, absl::Span<const AbstractOperation*> values) {
   size_t num_values = values.size();
   std::unique_ptr<NameAttrList[]> funcs(new NameAttrList[num_values]);
   for (int i = 0; i < num_values; i++) {
@@ -235,6 +235,14 @@ Status EagerOperation::InputLength(const char* input_name, int* length) {
   return Status::OK();
 }
 
+absl::Span<ImmediateExecutionTensorHandle* const> EagerOperation::GetInputs()
+    const {
+  // TODO(b/162536003): Remove reinterpret_cast.
+  return absl::MakeSpan(
+      reinterpret_cast<ImmediateExecutionTensorHandle* const*>(inputs_.data()),
+      inputs_.size());
+}
+
 Status EagerOperation::OutputLength(const char* output_name, int* length) {
   Status status;
   const tensorflow::OpDef* op_def = GetOpDef(&status);
@@ -254,17 +262,17 @@ Status EagerOperation::OutputLength(const char* output_name, int* length) {
   return Status::OK();
 }
 
-Status EagerOperation::AddInput(AbstractTensorHandleInterface* input) {
+Status EagerOperation::AddInput(AbstractTensorHandle* input) {
   TensorHandle* h = TensorHandleFromInterface(input);
-  AddInput(h);
+  AddTensorHandle(h);
   return MaybeInferSingleInputAttrs(h);
 }
 
 Status EagerOperation::AddInputList(
-    absl::Span<AbstractTensorHandleInterface*> inputs) {
+    absl::Span<AbstractTensorHandle* const> inputs) {
   for (auto& input : inputs) {
     TensorHandle* h = TensorHandleFromInterface(input);
-    AddInput(h);
+    AddTensorHandle(h);
   }
   return InferInputListAttrs(inputs.size());
 }
@@ -275,7 +283,7 @@ Status EagerOperation::SetUseXla(bool enable) {
 }
 
 Status EagerOperation::Reset(
-    const char* op, const char* raw_device_name, bool remote,
+    const char* op, const char* device_name, bool remote,
     EagerExecutor* executor,
     const absl::optional<EagerRemoteFunctionParams> remote_func_params) {
   DCHECK(inputs_.empty());
@@ -306,20 +314,13 @@ Status EagerOperation::Reset(
   }
   attrs_.Reset(op);
   use_xla_ = false;
+  stack_trace_.reset();
   is_function_ = is_function;
   cancellation_manager_ = nullptr;
   executor_ = executor ? executor : &ctx_.Executor();
   remote_func_params_ = remote_func_params;
   op_name_ = op;
-  if (raw_device_name != nullptr && strlen(raw_device_name) > 0) {
-    return SetDeviceName(raw_device_name);
-  } else {
-    raw_device_name_.clear();
-    device_name_.clear();
-    device_parsed_name_.Clear();
-    device_ = kVariantDeviceNull;
-    return Status::OK();
-  }
+  return SetDeviceName(device_name);
 }
 
 Status EagerOperation::MaybeInferSingleInputAttrs(TensorHandle* handle) {
@@ -389,26 +390,22 @@ Status EagerOperation::InferInputListAttrs(int num_inputs) {
   return Status::OK();
 }
 
-Status EagerOperation::SetDeviceName(const char* name) {
-  if (name != nullptr && strlen(name) > 0) {
-    if (name != raw_device_name_) {
-      if (!DeviceNameUtils::ParseFullName(name, &device_parsed_name_)) {
-        return errors::InvalidArgument("Malformed device specification '", name,
-                                       "' in eager op: ", DebugString());
-      }
-      raw_device_name_ = name;
-      device_name_ =
-          DeviceNameUtils::HasSomeDetails(device_parsed_name_)
-              ? DeviceNameUtils::ParsedNameToString(device_parsed_name_)
-              : "";
-      CustomDevice* custom_device;
-      if (ctx_.FindCustomDeviceFromName(device_name_, &custom_device).ok()) {
-        device_ = custom_device;
-      } else {
-        // Device placement for physical devices happens lazily in
-        // EagerExecute/EagerRemoteExecute, and can depend on the inputs.
-        device_ = kVariantDeviceNull;
-      }
+Status EagerOperation::SetDeviceName(const char* c_name) {
+  string name(c_name != nullptr ? c_name : "");
+  if (name != last_set_device_name_) {
+    if (!DeviceNameUtils::ParseFullName(name, &device_parsed_name_)) {
+      return errors::InvalidArgument("Malformed device specification '", name,
+                                     "' in eager op: ", DebugString());
+    }
+    last_set_device_name_ = name;
+    device_name_ = DeviceNameUtils::ParsedNameToString(device_parsed_name_);
+    CustomDevice* custom_device;
+    if (ctx_.FindCustomDeviceFromName(device_name_, &custom_device)) {
+      device_ = custom_device;
+    } else {
+      // Device placement for physical devices happens lazily in
+      // EagerExecute/EagerRemoteExecute, and can depend on the inputs.
+      device_ = kVariantDeviceNull;
     }
   }
   return Status::OK();
@@ -443,6 +440,12 @@ string EagerOperation::DebugString() const {
   Attrs().FillAttrValueMap(ndef.mutable_attr());
   strings::StrAppend(&out, "Attrs: ", ndef.DebugString(), "\n");
   return out;
+}
+
+void EagerOperation::AddTensorHandle(TensorHandle* h) {
+  h->Ref();
+  inputs_.push_back(h);
+  attrs_.NumInputs(static_cast<int>(inputs_.size()));
 }
 
 }  // namespace tensorflow
